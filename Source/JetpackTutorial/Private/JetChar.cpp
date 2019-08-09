@@ -6,6 +6,9 @@
 #include "JPGMovementComponent.h"
 #include "Components/InputComponent.h"
 #include "Kismet/KismetMathLibrary.h"
+#include "Kismet/KismetSystemLibrary.h"
+#include "ConfigCacheIni.h"
+#include "App.h"
 #include "Classes/Components/SkeletalMeshComponent.h"
 
 
@@ -42,6 +45,11 @@ void AJetChar::BeginPlay()
 
 	}
 
+	if (IsLocallyControlled())
+	{
+		FApp::SetUnfocusedVolumeMultiplier(1.0);
+	}
+
 }
 
 void AJetChar::OnMovementModeChanged(EMovementMode PreviousMovementMode, uint8 PreviousCustomMode)
@@ -74,6 +82,8 @@ void AJetChar::SetupPlayerInputComponent(UInputComponent* PlayerInputComponent)
 	PlayerInputComponent->BindAction("Sprint", EInputEvent::IE_Released, this, &AJetChar::SprintReleased);
 	PlayerInputComponent->BindAction("ToggleGlide", EInputEvent::IE_Pressed, this, &AJetChar::GlidePressed);
 	PlayerInputComponent->BindAction("ToggleGlide", EInputEvent::IE_Released, this, &AJetChar::GlideReleased);
+
+
 }
 
 void AJetChar::MoveForward(float Value)
@@ -109,9 +119,6 @@ void AJetChar::JumpPressed()
 	UJPGMovementComponent* mc = Cast<UJPGMovementComponent>(GetCharacterMovement());
 	if (mc)
 	{
-		if (!HasAuthority())
-			mc->ServerSetJetpackingRPC(1.0);
-		//else
 		mc->SetJetpacking(1.0);
 	}
 }
@@ -171,4 +178,5 @@ void AJetChar::GlideReleased()
 
 
 }
+
 

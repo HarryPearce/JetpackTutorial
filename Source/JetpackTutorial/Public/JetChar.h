@@ -12,10 +12,13 @@ class JETPACKTUTORIAL_API AJetChar : public ACharacter
 {
 	GENERATED_BODY()
 
+
 public:
 	// Sets default values for this character's properties
 	AJetChar(const FObjectInitializer& ObjectInitializer);
 	//AJetChar();
+
+	
 protected:
 
 	// Called when the game starts or when spawned
@@ -38,6 +41,7 @@ public:
 	void GlidePressed();
 
 	void GlideReleased();
+
 
 	void MoveForward(float Value);
 	void MoveRight(float Value);

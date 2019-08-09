@@ -4,6 +4,7 @@
 #include "CoreMinimal.h"
 #include "GameFramework/CharacterMovementComponent.h"
 #include "UObject/ObjectMacros.h"
+#include "Sound/SoundCue.h"
 #include "JPGMovementComponent.generated.h"
 
 /**
@@ -22,7 +23,8 @@ class JETPACKTUTORIAL_API UJPGMovementComponent : public UCharacterMovementCompo
 {
 	GENERATED_BODY()
 
-	FRotator previousControlDirection;
+		FRotator previousControlDirection;
+	USoundCue* teleportSound;
 
 	UJPGMovementComponent();
 
@@ -52,10 +54,15 @@ class JETPACKTUTORIAL_API UJPGMovementComponent : public UCharacterMovementCompo
 	void PhysGlide(float deltaTime, int32 Iterations);
 
 #pragma endregion	
-	
+
 #pragma region Helpers
 	void MeasureDistanceFromGround();
 	bool IsCustomMovementMode(uint8 cm) const;
+	void ProcessTeleport();
+
+	UFUNCTION(NetMulticast, unreliable)
+		void MulticastPlayTeleportSound(FVector location);
+
 #pragma endregion
 
 protected:
@@ -65,6 +72,7 @@ protected:
 	void execSetSprinting(bool wantsToSprint);
 	void execSetJetpacking(float throttle);
 	void execSetGliding(bool wantsToGlide);
+	void execSetTeleport(bool wantsToTeleport, FVector destination);
 
 #pragma endregion
 
@@ -131,6 +139,8 @@ public:
 		void SetJetpacking(float throttle);
 	UFUNCTION(BlueprintCallable)
 		void SetGliding(bool wantsToGlide);
+	UFUNCTION(BlueprintCallable)
+		void SetTeleport(bool wantsToTeleport, FVector destination);
 
 #pragma region RPCs
 
@@ -148,6 +158,12 @@ public:
 		void ServerSetGlidingRPC(bool wantsToGlide);
 	UFUNCTION(Client, Reliable, BlueprintCallable)
 		void ClientSetGlidingRPC(bool wantsToGlide);
+
+	UFUNCTION(Server, Reliable, WithValidation, BlueprintCallable)
+		void ServerSetTeleportRPC(bool wantsToTeleport, FVector destination);
+	UFUNCTION(Client, Reliable, BlueprintCallable)
+		void ClientSetTeleportRPC(bool wantsToTeleport, FVector destination);
+
 #pragma endregion
 
 #pragma endregion
@@ -159,6 +175,7 @@ public:
 		bool IsJetpacking();
 	UFUNCTION(BlueprintCallable)
 		bool IsGliding();
+
 #pragma endregion
 
 #pragma region State Conditions
@@ -166,7 +183,7 @@ public:
 	bool CanJetpack();
 	bool CanGlide();
 	bool CanSprint();
-
+	bool CanTeleport();
 
 #pragma endregion
 
@@ -184,6 +201,10 @@ public:
 	bool bWantsToGlide : 1;
 	bool bWantsToSprint : 1;
 	bool bWantsToJetpack : 1;
+	bool bWantsToTeleport : 1;
+
+	UPROPERTY(BlueprintReadOnly, Category = "Custom|State")
+		FVector teleportDestination;
 
 	UPROPERTY(BlueprintReadOnly, Category = "Custom|State")
 		float angleOfAttack;
@@ -200,6 +221,7 @@ class FSavedMove_JPGMovement : public FSavedMove_Character
 {
 
 	friend class UJPGMovementComponent;
+	
 
 public:
 	typedef FSavedMove_Character Super;
@@ -214,6 +236,9 @@ public:
 	float savedDesiredThrottle;
 	bool savedWantsToGlide : 1;
 	bool savedWantsToSprint : 1;
+
+	bool savedWantsToTeleport : 1;
+	FVector savedTeleportDestination;
 };
 
 /** Get prediction data for a client game. Should not be used if not running as a client. Allocates the data on demand and can be overridden to allocate a custom override if desired. Result must be a FNetworkPredictionData_Client_Character. */
