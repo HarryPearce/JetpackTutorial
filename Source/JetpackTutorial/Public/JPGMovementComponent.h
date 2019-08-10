@@ -18,6 +18,8 @@ enum ECustomMovementMode
 	CMOVE_SPRINT = 3
 };
 
+DECLARE_DYNAMIC_MULTICAST_DELEGATE_TwoParams(FDesiredThrottleDelegate, float, oldThrottle,float,newThrottle);
+
 UCLASS()
 class JETPACKTUTORIAL_API UJPGMovementComponent : public UCharacterMovementComponent
 {
@@ -56,12 +58,15 @@ class JETPACKTUTORIAL_API UJPGMovementComponent : public UCharacterMovementCompo
 #pragma endregion	
 
 #pragma region Helpers
+
 	void MeasureDistanceFromGround();
 	bool IsCustomMovementMode(uint8 cm) const;
 	void ProcessTeleport();
+	float GetJetpackRechargeAmount(float time);
 
 	UFUNCTION(NetMulticast, unreliable)
 		void MulticastPlayTeleportSound(FVector location);
+
 
 #pragma endregion
 
@@ -142,27 +147,39 @@ public:
 	UFUNCTION(BlueprintCallable)
 		void SetTeleport(bool wantsToTeleport, FVector destination);
 
+	UPROPERTY(BlueprintAssignable, Category = "Test")
+		FDesiredThrottleDelegate OnJetpackingChanged;
+
+
 #pragma region RPCs
 
 	UFUNCTION(Server, Reliable, WithValidation, BlueprintCallable)
-		void ServerSetSprintingRPC(bool wantsToGlide);
+		void ServerSetSprintingRPC(bool wantsToSprint);
 	UFUNCTION(Client, Reliable, BlueprintCallable)
-		void ClientSetSprintingRPC(bool wantsToGlide);
+		void ClientSetSprintingRPC(bool wantsToSprint);
+	UFUNCTION(NetMulticast, Reliable, BlueprintCallable)
+		void MulticastSetSprintingRPC(bool wantsToSprint);
 
 	UFUNCTION(Server, Reliable, WithValidation, BlueprintCallable)
 		void ServerSetJetpackingRPC(float throttle);
 	UFUNCTION(Client, Reliable, BlueprintCallable)
 		void ClientSetJetpackingRPC(float throttle);
+	UFUNCTION(NetMulticast, Reliable, BlueprintCallable)
+		void MulticastSetJetpackingRPC(float throttle);
 
 	UFUNCTION(Server, Reliable, WithValidation, BlueprintCallable)
 		void ServerSetGlidingRPC(bool wantsToGlide);
 	UFUNCTION(Client, Reliable, BlueprintCallable)
 		void ClientSetGlidingRPC(bool wantsToGlide);
+	UFUNCTION(NetMulticast, Reliable, BlueprintCallable)
+		void MulticastSetGlidingRPC(bool wantsToGlide);
 
 	UFUNCTION(Server, Reliable, WithValidation, BlueprintCallable)
 		void ServerSetTeleportRPC(bool wantsToTeleport, FVector destination);
 	UFUNCTION(Client, Reliable, BlueprintCallable)
 		void ClientSetTeleportRPC(bool wantsToTeleport, FVector destination);
+	UFUNCTION(NetMulticast, Reliable, BlueprintCallable)
+		void MulticastSetTeleportRPC(bool wantsToTeleport, FVector destination);
 
 #pragma endregion
 
@@ -230,6 +247,7 @@ public:
 	virtual bool CanCombineWith(const FSavedMovePtr& NewMove, ACharacter* Character, float MaxDelta) const override;
 	virtual void SetMoveFor(ACharacter* Character, float InDeltaTime, FVector const& NewAccel, class FNetworkPredictionData_Client_Character & ClientData) override;
 	virtual void PrepMoveFor(ACharacter* Character) override;
+	virtual void CombineWith(const FSavedMove_Character* OldMove, ACharacter* InCharacter, APlayerController* PC, const FVector& OldStartLocation) override;
 
 	float savedJetpackResource;
 	float savedDistanceFromGround;

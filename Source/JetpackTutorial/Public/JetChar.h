@@ -5,6 +5,7 @@
 #include "CoreMinimal.h"
 #include "GameFramework/Character.h"
 #include "CoreUObject/Public/UObject/UObjectGlobals.h"
+#include "JPGMovementComponent.h"
 #include "JetChar.generated.h"
 
 UCLASS()
@@ -13,19 +14,19 @@ class JETPACKTUTORIAL_API AJetChar : public ACharacter
 	GENERATED_BODY()
 
 
-public:
-	// Sets default values for this character's properties
-	AJetChar(const FObjectInitializer& ObjectInitializer);
-	//AJetChar();
-
+		UJPGMovementComponent* cachedCMC;
 	
 protected:
 
 	// Called when the game starts or when spawned
 	virtual void BeginPlay() override;
 	virtual void OnMovementModeChanged(EMovementMode PreviousMovementMode, uint8 PreviousCustomMode) override;
+	virtual void PostInitializeComponents() override;
 
 public:	
+	// Sets default values for this character's properties
+	AJetChar(const FObjectInitializer& ObjectInitializer);
+
 	// Called every frame
 	virtual void Tick(float DeltaTime) override;
 
@@ -41,6 +42,9 @@ public:
 	void GlidePressed();
 
 	void GlideReleased();
+
+	UFUNCTION(BlueprintCallable, BlueprintPure,Category = "Custom")
+		FORCEINLINE UJPGMovementComponent* GetJPGMovementComponent() { return cachedCMC; };
 
 
 	void MoveForward(float Value);

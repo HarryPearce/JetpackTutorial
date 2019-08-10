@@ -11,6 +11,7 @@
 #include "Engine/Classes/GameFramework/PlayerController.h"
 #include "Engine/Classes/Kismet/GameplayStatics.h"
 #include "Engine/Classes/GameFramework/Controller.h"
+#include "UnrealNetwork.h"
 
 UJPGMovementComponent::UJPGMovementComponent()
 {
@@ -25,6 +26,7 @@ UJPGMovementComponent::UJPGMovementComponent()
 
 void UJPGMovementComponent::PhysCustom(float deltaTime, int32 Iterations)
 {
+	//UKismetSystemLibrary::PrintString(GetWorld(), GetOwner()->GetName() + FString("PhysCustom"), true, false, FLinearColor::Blue, 0.0);
 
 	if (CustomMovementMode == ECustomMovementMode::CMOVE_JETPACK)
 	{
@@ -53,7 +55,7 @@ void UJPGMovementComponent::PhysSprint(float deltaTime, int32 Iterations)
 
 	if (!bWantsToSprint)
 	{
-		SetSprinting(false);
+		//SetSprinting(false);
 		SetMovementMode(EMovementMode::MOVE_Walking);
 		StartNewPhysics(deltaTime, Iterations);
 		return;
@@ -64,6 +66,7 @@ void UJPGMovementComponent::PhysSprint(float deltaTime, int32 Iterations)
 
 void UJPGMovementComponent::PhysJetpack(float deltaTime, int32 Iterations)
 {
+	//UKismetSystemLibrary::PrintString(GetWorld(),GetOwner()->GetName() +   FString("PhysJetpack"), true, false, FLinearColor::Blue, 0.0);
 	if (!IsCustomMovementMode(ECustomMovementMode::CMOVE_JETPACK))
 	{
 		SetJetpacking(0.0);
@@ -75,7 +78,6 @@ void UJPGMovementComponent::PhysJetpack(float deltaTime, int32 Iterations)
 		fDistanceFromGround <= 0 ||
 		fJetpackResource <= (deltaTime / JetpackMaxTime))
 	{
-		SetJetpacking(0.0);
 		SetMovementMode(EMovementMode::MOVE_Falling);
 		StartNewPhysics(deltaTime, Iterations);
 		return;
@@ -209,9 +211,16 @@ void UJPGMovementComponent::PhysGlide(float deltaTime, int32 Iterations)
 	//if we do not want to glide anymore, or we are too low, cancel gliding mode
 	if (!bWantsToGlide || fDistanceFromGround < GliderCancelDistanceFromGround)
 	{
-		SetGliding(false);
+		//SetGliding(false);
 		SetMovementMode(EMovementMode::MOVE_Falling);
 		StartNewPhysics(deltaTime, Iterations);
+		return;
+	}
+
+	if (GetOwnerRole() == ROLE_SimulatedProxy)
+	{
+		FHitResult out;
+		SafeMoveUpdatedComponent(Velocity * deltaTime, GetOwner()->GetActorRotation(), true, out);
 		return;
 	}
 
@@ -234,7 +243,8 @@ void UJPGMovementComponent::PhysGlide(float deltaTime, int32 Iterations)
 	controlDirection = previousControlDirection + controlDirectionDelta;
 
 	//clamp shifts angle to 0-360 range, for some reason SetControlRotation prefers it this way
-	GetPawnOwner()->Controller->SetControlRotation(controlDirection.Clamp());
+	if (GetPawnOwner()->Controller)
+		GetPawnOwner()->Controller->SetControlRotation(controlDirection.Clamp());
 
 	//pitch is flipped to invert vertical mouselook, and is rotated by further 90 degrees, because we are parallel to the ground when we glide
 	FRotator pitchFlippedControlDirection = FRotator((controlDirection.Pitch * -1) - 90, controlDirection.Yaw, controlDirection.Roll).Clamp();
@@ -255,8 +265,7 @@ void UJPGMovementComponent::PhysGlide(float deltaTime, int32 Iterations)
 
 	if (out.bBlockingHit)
 	{
-		SetMovementMode(EMovementMode::MOVE_Falling);
-		SetGliding(false);
+		SetMovementMode(EMovementMode::MOVE_Falling);		
 	}
 }
 
@@ -266,13 +275,16 @@ void UJPGMovementComponent::PhysGlide(float deltaTime, int32 Iterations)
 
 void UJPGMovementComponent::TickComponent(float DeltaTime, ELevelTick TickType, FActorComponentTickFunction * ThisTickFunction)
 {
+	//UKismetSystemLibrary::PrintString(GetWorld(), GetOwner()->GetName() + FString("TickComponent"), true, false, FLinearColor::Red, 0.0);
 	Super::TickComponent(DeltaTime, TickType, ThisTickFunction);
 
 	//recharge jetpack resource
 	if (MovementMode != EMovementMode::MOVE_Custom || CustomMovementMode != ECustomMovementMode::CMOVE_JETPACK)
 	{
-		fJetpackResource = FMath::Clamp<float>(fJetpackResource + (DeltaTime / JetpackFullRechargeSeconds), 0, 1);
+		fJetpackResource = FMath::Clamp<float>(fJetpackResource + GetJetpackRechargeAmount(DeltaTime), 0, 1);
 	}
+	UKismetSystemLibrary::PrintString(GetWorld(), GetOwner()->GetName() + FString("fJetpackResource ") + FString::SanitizeFloat(fJetpackResource), true, false, FLinearColor::Red, 0.0);
+	UKismetSystemLibrary::PrintString(GetWorld(), GetOwner()->GetName() + FString("fDesiredThrottle ") + FString::SanitizeFloat(fDesiredThrottle), true, false, FLinearColor::Red, 0.0);
 #pragma region Debug Prints
 	//FVector normVel = FVector(Velocity);
 	//normVel.Normalize();
@@ -294,6 +306,7 @@ void UJPGMovementComponent::TickComponent(float DeltaTime, ELevelTick TickType, 
 
 void UJPGMovementComponent::OnMovementUpdated(float DeltaSeconds, const FVector & OldLocation, const FVector & OldVelocity)
 {
+	//UKismetSystemLibrary::PrintString(GetWorld(), GetOwner()->GetName() + FString("OnMovementUpdated"), true, false, FLinearColor::Red, 0.0);
 	MeasureDistanceFromGround();
 
 	if (bWantsToSprint)
@@ -333,13 +346,13 @@ void UJPGMovementComponent::OnMovementUpdated(float DeltaSeconds, const FVector 
 	}
 
 	if (bWantsToTeleport)
-	{		
+	{
 		if (CanTeleport())
 		{
 			ProcessTeleport();
 		}
 		else
-		{			
+		{
 			SetTeleport(false, FVector::ZeroVector);
 		}
 
@@ -350,6 +363,7 @@ void UJPGMovementComponent::OnMovementUpdated(float DeltaSeconds, const FVector 
 
 void UJPGMovementComponent::OnMovementModeChanged(EMovementMode PreviousMovementMode, uint8 PreviousCustomMode)
 {
+	//UKismetSystemLibrary::PrintString(GetWorld(), GetOwner()->GetName() + FString("OnMovementModeChanged "), true, true, FLinearColor::Red, 10);
 	bool suppressSuperNotification = false;
 
 	if (PreviousMovementMode == MovementMode && PreviousCustomMode == CustomMovementMode)
@@ -378,8 +392,8 @@ void UJPGMovementComponent::OnMovementModeChanged(EMovementMode PreviousMovement
 		{
 			FRotator controlDirection = GetPawnOwner()->GetControlRotation();
 			GetPawnOwner()->Controller->SetControlRotation(FRotator(controlDirection.GetNormalized().Pitch * -1, controlDirection.Yaw, controlDirection.Roll).Clamp());
-			GetOwner()->SetActorRotation(FRotator(0, GetOwner()->GetActorRotation().Yaw, 0));
 		}
+		GetOwner()->SetActorRotation(FRotator(0, GetOwner()->GetActorRotation().Yaw, 0));
 	}
 
 #pragma endregion
@@ -407,8 +421,8 @@ void UJPGMovementComponent::OnMovementModeChanged(EMovementMode PreviousMovement
 			FRotator currentControlRotation = GetPawnOwner()->GetControlRotation();
 			currentControlRotation.GetNormalized();
 			GetPawnOwner()->Controller->SetControlRotation(FRotator(currentControlRotation.Pitch * -1, currentControlRotation.Yaw, currentControlRotation.Roll).Clamp());
-			previousControlDirection = GetPawnOwner()->GetControlRotation();
 		}
+		previousControlDirection = GetPawnOwner()->GetControlRotation();
 	}
 
 #pragma endregion
@@ -490,28 +504,32 @@ void UJPGMovementComponent::MeasureDistanceFromGround()
 
 void UJPGMovementComponent::ProcessTeleport()
 {
+	UKismetSystemLibrary::PrintString(GetWorld(), GetOwner()->GetName() + FString("ProcessTeleport"), true, true, FLinearColor::Red, 10);
 	FHitResult res;
 
 	SafeMoveUpdatedComponent(teleportDestination - GetOwner()->GetActorLocation(), GetOwner()->GetActorRotation(), false, res, ETeleportType::TeleportPhysics);
-	
-	if (GetPawnOwner()->IsLocallyControlled())
-	{		
-		UGameplayStatics::PlaySoundAtLocation(GetWorld(), teleportSound, teleportDestination);
-	}
-
-	if (GetOwner()->HasAuthority())
-	{		
-		MulticastPlayTeleportSound(teleportDestination);
-	}
+	UGameplayStatics::PlaySoundAtLocation(GetWorld(), teleportSound, teleportDestination);
 
 	execSetTeleport(false, FVector::ZeroVector);
 }
 
+float UJPGMovementComponent::GetJetpackRechargeAmount(float time)
+{
+
+	if (MovementMode != EMovementMode::MOVE_Custom || CustomMovementMode != ECustomMovementMode::CMOVE_JETPACK)
+	{
+		return time / JetpackFullRechargeSeconds;
+	}
+	return 0.0;
+}
+
 void UJPGMovementComponent::MulticastPlayTeleportSound_Implementation(FVector location)
 {
+	UKismetSystemLibrary::PrintString(GetWorld(), GetOwner()->GetName() + FString("MulticastPlayTeleportSound_Implementation"), true, true, FLinearColor::Red, 10);
 	//this should only execute on proxies
 	if (!GetPawnOwner()->IsLocallyControlled())
-	{	
+	{
+		UKismetSystemLibrary::PrintString(GetWorld(), GetOwner()->GetName() + FString("MC_PlaySoundAtLocation"), true, true, FLinearColor::Red, 10);
 		UGameplayStatics::PlaySoundAtLocation(GetWorld(), teleportSound, location);
 	}
 }
@@ -521,6 +539,7 @@ void UJPGMovementComponent::MulticastPlayTeleportSound_Implementation(FVector lo
 
 void UJPGMovementComponent::SetJetpacking(float throttle)
 {
+	//UKismetSystemLibrary::PrintString(GetWorld(), GetOwner()->GetName() + FString("SetJetpacking"), true, true, FLinearColor::Red, 10);
 	if (throttle != fDesiredThrottle)
 	{
 		execSetJetpacking(throttle);
@@ -532,10 +551,12 @@ void UJPGMovementComponent::SetJetpacking(float throttle)
 
 		if (!GetOwner()->HasAuthority() && GetPawnOwner()->IsLocallyControlled())
 		{
+			//UKismetSystemLibrary::PrintString(GetWorld(), GetOwner()->GetName() + FString("ServerSetJetpackingRPC"), true, true, FLinearColor::Green, 10);
 			ServerSetJetpackingRPC(throttle);
 		}
 		else if (GetOwner()->HasAuthority() && !GetPawnOwner()->IsLocallyControlled())
 		{
+			//UKismetSystemLibrary::PrintString(GetWorld(), GetOwner()->GetName() + FString("ClientSetJetpackingRPC"), true, true, FLinearColor::Black, 10);
 			ClientSetJetpackingRPC(throttle);
 		}
 
@@ -571,7 +592,7 @@ void UJPGMovementComponent::SetGliding(bool wantsToGlide)
 
 void UJPGMovementComponent::SetTeleport(bool wantsToTeleport, FVector destination)
 {
-	
+	UKismetSystemLibrary::PrintString(GetWorld(), GetOwner()->GetName() + FString("SetTeleport"), true, true, FLinearColor::Red, 10);
 	if (bWantsToTeleport != wantsToTeleport || teleportDestination != destination)
 	{
 		execSetTeleport(wantsToTeleport, destination);
@@ -582,11 +603,13 @@ void UJPGMovementComponent::SetTeleport(bool wantsToTeleport, FVector destinatio
 			return;
 
 		if (!GetOwner()->HasAuthority() && GetPawnOwner()->IsLocallyControlled())
-		{			
+		{
+			UKismetSystemLibrary::PrintString(GetWorld(), GetOwner()->GetName() + FString("ServerSetTeleportRPC"), true, true, FLinearColor::Green, 10);
 			ServerSetTeleportRPC(wantsToTeleport, destination);
 		}
 		else if (GetOwner()->HasAuthority() && !GetPawnOwner()->IsLocallyControlled())
-		{			
+		{
+			UKismetSystemLibrary::PrintString(GetWorld(), GetOwner()->GetName() + FString("ClientSetTeleportRPC"), true, true, FLinearColor::Black, 10);
 			ClientSetTeleportRPC(wantsToTeleport, destination);
 		}
 
@@ -630,9 +653,14 @@ void UJPGMovementComponent::execSetSprinting(bool wantsToSprint)
 
 void UJPGMovementComponent::execSetJetpacking(float throttle)
 {
+	//UKismetSystemLibrary::PrintString(GetWorld(), GetOwner()->GetName() + FString("execSetJetpacking"), true, true, FLinearColor::Red, 10);
+	float oldThrottle = fDesiredThrottle;
 	throttle = FMath::Clamp<float>(throttle, 0.0, 1.0);
 	bWantsToJetpack = throttle > 0;
 	fDesiredThrottle = throttle;
+
+	if (OnJetpackingChanged.IsBound())
+		OnJetpackingChanged.Broadcast(oldThrottle, fDesiredThrottle);
 }
 
 void UJPGMovementComponent::execSetGliding(bool wantsToGlide)
@@ -641,7 +669,8 @@ void UJPGMovementComponent::execSetGliding(bool wantsToGlide)
 }
 
 void UJPGMovementComponent::execSetTeleport(bool wantsToTeleport, FVector destination)
-{	
+{
+	UKismetSystemLibrary::PrintString(GetWorld(), FString("execSetTeleport"), true, true, FLinearColor::Red, 10);
 	bWantsToTeleport = wantsToTeleport;
 	teleportDestination = destination;
 }
@@ -652,6 +681,7 @@ void UJPGMovementComponent::execSetTeleport(bool wantsToTeleport, FVector destin
 
 void UJPGMovementComponent::ClientSetJetpackingRPC_Implementation(float throttle)
 {
+	//UKismetSystemLibrary::PrintString(GetWorld(), GetOwner()->GetName() + FString("ClientSetJetpackingRPC_Implementation"), true, true, FLinearColor::Green, 10);
 	execSetJetpacking(throttle);
 }
 
@@ -662,6 +692,13 @@ bool UJPGMovementComponent::ServerSetJetpackingRPC_Validate(float throttle)
 
 void UJPGMovementComponent::ServerSetJetpackingRPC_Implementation(float throttle)
 {
+	//UKismetSystemLibrary::PrintString(GetWorld(), GetOwner()->GetName() + FString("ServerSetJetpackingRPC_Implementation"), true, true, FLinearColor::Black, 10);
+	MulticastSetJetpackingRPC(throttle);
+}
+
+void UJPGMovementComponent::MulticastSetJetpackingRPC_Implementation(float throttle)
+{
+	//UKismetSystemLibrary::PrintString(GetWorld(), GetOwner()->GetName() + FString("MulticastSetJetpackingRPC_Implementation"), true, true, FLinearColor::Black, 10);
 	execSetJetpacking(throttle);
 }
 
@@ -680,8 +717,12 @@ bool UJPGMovementComponent::ServerSetGlidingRPC_Validate(bool wantsToGlide)
 }
 
 void UJPGMovementComponent::ServerSetGlidingRPC_Implementation(bool wantsToGlide)
-{
+{	
+	MulticastSetGlidingRPC(wantsToGlide);
+}
 
+void UJPGMovementComponent::MulticastSetGlidingRPC_Implementation(bool wantsToGlide)
+{
 	execSetGliding(wantsToGlide);
 }
 
@@ -701,8 +742,12 @@ bool UJPGMovementComponent::ServerSetSprintingRPC_Validate(bool wantsToSprint)
 
 void UJPGMovementComponent::ServerSetSprintingRPC_Implementation(bool wantsToSprint)
 {
-	execSetSprinting(wantsToSprint);
+	MulticastSetSprintingRPC(wantsToSprint);
+}
 
+void UJPGMovementComponent::MulticastSetSprintingRPC_Implementation(bool wantsToSprint)
+{
+	execSetSprinting(wantsToSprint);
 }
 
 #pragma endregion
@@ -710,7 +755,8 @@ void UJPGMovementComponent::ServerSetSprintingRPC_Implementation(bool wantsToSpr
 #pragma region Teleport Replication
 
 void UJPGMovementComponent::ClientSetTeleportRPC_Implementation(bool wantsToTeleport, FVector destination)
-{	
+{
+	UKismetSystemLibrary::PrintString(GetWorld(), FString("ClientSetTeleportRPC_Implementation"), true, true, FLinearColor::Green, 10);
 	execSetTeleport(wantsToTeleport, destination);
 }
 
@@ -720,7 +766,14 @@ bool UJPGMovementComponent::ServerSetTeleportRPC_Validate(bool wantsToTeleport, 
 }
 
 void UJPGMovementComponent::ServerSetTeleportRPC_Implementation(bool wantsToTeleport, FVector destination)
-{	
+{
+	UKismetSystemLibrary::PrintString(GetWorld(), FString("ServerSetTeleportRPC_Implementation"), true, true, FLinearColor::Black, 10);
+	MulticastSetTeleportRPC(wantsToTeleport, destination);
+}
+
+void UJPGMovementComponent::MulticastSetTeleportRPC_Implementation(bool wantsToTeleport, FVector destination)
+{
+	UKismetSystemLibrary::PrintString(GetWorld(), FString("MulticastSetTeleportRPC_Implementation"), true, true, FLinearColor::Black, 10);
 	execSetTeleport(wantsToTeleport, destination);
 }
 
@@ -836,8 +889,6 @@ uint8 FSavedMove_JPGMovement::GetCompressedFlags() const
 
 bool FSavedMove_JPGMovement::CanCombineWith(const FSavedMovePtr & NewMove, ACharacter * Character, float MaxDelta) const
 {
-	if (savedJetpackResource != ((FSavedMove_JPGMovement*)&NewMove)->savedJetpackResource)
-		return false;
 	if (savedDistanceFromGround != ((FSavedMove_JPGMovement*)&NewMove)->savedDistanceFromGround)
 		return false;
 	if (savedDesiredThrottle != ((FSavedMove_JPGMovement*)&NewMove)->savedDesiredThrottle)
@@ -853,6 +904,20 @@ bool FSavedMove_JPGMovement::CanCombineWith(const FSavedMovePtr & NewMove, AChar
 
 	return Super::CanCombineWith(NewMove, Character, MaxDelta);
 }
+
+void FSavedMove_JPGMovement::CombineWith(const FSavedMove_Character * OldMove, ACharacter * InCharacter, APlayerController * PC, const FVector & OldStartLocation)
+{
+	//before it is combine, the DeltaTime in the current move is measured from the old move
+	UJPGMovementComponent *mc = Cast< UJPGMovementComponent>(InCharacter->GetMovementComponent());
+	if (mc)
+	{
+
+	}
+	UKismetSystemLibrary::PrintString(InCharacter->GetWorld(), "Combined Move", true, true, FLinearColor::Red, 10);
+
+	Super::CombineWith(OldMove, InCharacter, PC, OldStartLocation);
+}
+
 
 void FSavedMove_JPGMovement::SetMoveFor(ACharacter * Character, float InDeltaTime, FVector const & NewAccel, FNetworkPredictionData_Client_Character & ClientData)
 {

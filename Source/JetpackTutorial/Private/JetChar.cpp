@@ -49,7 +49,7 @@ void AJetChar::BeginPlay()
 	{
 		FApp::SetUnfocusedVolumeMultiplier(1.0);
 	}
-
+	
 }
 
 void AJetChar::OnMovementModeChanged(EMovementMode PreviousMovementMode, uint8 PreviousCustomMode)
@@ -59,6 +59,13 @@ void AJetChar::OnMovementModeChanged(EMovementMode PreviousMovementMode, uint8 P
 	{
 
 	}
+}
+
+void AJetChar::PostInitializeComponents()
+{
+	
+	cachedCMC = Cast<UJPGMovementComponent>(GetCharacterMovement());
+	Super::PostInitializeComponents();
 }
 
 // Called every frame
@@ -128,10 +135,7 @@ void AJetChar::JumpReleased()
 	Super::StopJumping();
 	UJPGMovementComponent* mc = Cast<UJPGMovementComponent>(GetCharacterMovement());
 	if (mc)
-	{
-		if (!HasAuthority())
-			mc->ServerSetJetpackingRPC(0.0);
-		//else
+	{				
 		mc->SetJetpacking(0.0);
 	}
 }
@@ -140,10 +144,7 @@ void AJetChar::SprintPressed()
 {
 	UJPGMovementComponent* mc = Cast<UJPGMovementComponent>(GetCharacterMovement());
 	if (mc)
-	{
-		if (!HasAuthority())
-			mc->ServerSetSprintingRPC(true);
-		//else
+	{		
 		mc->SetSprinting(true);
 	}
 }
@@ -152,10 +153,7 @@ void AJetChar::SprintReleased()
 {
 	UJPGMovementComponent* mc = Cast<UJPGMovementComponent>(GetCharacterMovement());
 	if (mc)
-	{
-		if (!HasAuthority())
-			mc->ServerSetSprintingRPC(false);
-		//else
+	{		
 		mc->SetSprinting(false);
 	}
 }
@@ -165,10 +163,7 @@ void AJetChar::GlidePressed()
 
 	UJPGMovementComponent* mc = Cast<UJPGMovementComponent>(GetCharacterMovement());
 	if (mc)
-	{
-		if (!HasAuthority())
-			mc->ServerSetGlidingRPC(!mc->bWantsToGlide);
-		//else
+	{		
 		mc->SetGliding(!mc->bWantsToGlide);
 	}
 }
