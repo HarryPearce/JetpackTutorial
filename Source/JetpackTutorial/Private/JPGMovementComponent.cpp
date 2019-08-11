@@ -11,6 +11,7 @@
 #include "Engine/Classes/GameFramework/PlayerController.h"
 #include "Engine/Classes/Kismet/GameplayStatics.h"
 #include "Engine/Classes/GameFramework/Controller.h"
+#include "JetChar.h"
 #include "UnrealNetwork.h"
 
 UJPGMovementComponent::UJPGMovementComponent()
@@ -20,6 +21,7 @@ UJPGMovementComponent::UJPGMovementComponent()
 	fDesiredThrottle = 0.0;
 	static ConstructorHelpers::FObjectFinder<USoundCue> ts(TEXT("'/Game/ThirdPersonBP/Blueprints/Enderman_teleport_Cue.Enderman_teleport_Cue'"));
 	teleportSound = ts.Object;
+	JetCharOwner = Cast<AJetChar>(GetOwner());
 }
 
 #pragma region Movement Mode Implementations
@@ -45,7 +47,7 @@ void UJPGMovementComponent::PhysCustom(float deltaTime, int32 Iterations)
 
 void UJPGMovementComponent::PhysSprint(float deltaTime, int32 Iterations)
 {
-
+	UKismetSystemLibrary::PrintString(GetWorld(), GetOwner()->GetName() + FString("PhysSprint"), true, false, FLinearColor::Red, 0.0);
 	if (!IsCustomMovementMode(ECustomMovementMode::CMOVE_SPRINT))
 	{
 		SetSprinting(false);
@@ -55,7 +57,9 @@ void UJPGMovementComponent::PhysSprint(float deltaTime, int32 Iterations)
 
 	if (!bWantsToSprint)
 	{
+
 		//SetSprinting(false);
+		UKismetSystemLibrary::PrintString(GetWorld(), GetOwner()->GetName() + FString("SetMovementMode Walk"), true, true, FLinearColor::Red, 10);
 		SetMovementMode(EMovementMode::MOVE_Walking);
 		StartNewPhysics(deltaTime, Iterations);
 		return;
@@ -241,10 +245,19 @@ void UJPGMovementComponent::PhysGlide(float deltaTime, int32 Iterations)
 	);
 
 	controlDirection = previousControlDirection + controlDirectionDelta;
+	/*if (controlDirectionDelta != FRotator::ZeroRotator)
+	{
+		MulticastSetControlRotation(controlDirection);
+	}*/
 
 	//clamp shifts angle to 0-360 range, for some reason SetControlRotation prefers it this way
 	if (GetPawnOwner()->Controller)
 		GetPawnOwner()->Controller->SetControlRotation(controlDirection.Clamp());
+
+	if (GetOwnerRole() == ROLE_SimulatedProxy)
+	{
+		//controlDirection = simulationControlRotation;
+	}
 
 	//pitch is flipped to invert vertical mouselook, and is rotated by further 90 degrees, because we are parallel to the ground when we glide
 	FRotator pitchFlippedControlDirection = FRotator((controlDirection.Pitch * -1) - 90, controlDirection.Yaw, controlDirection.Roll).Clamp();
@@ -265,7 +278,7 @@ void UJPGMovementComponent::PhysGlide(float deltaTime, int32 Iterations)
 
 	if (out.bBlockingHit)
 	{
-		SetMovementMode(EMovementMode::MOVE_Falling);		
+		SetMovementMode(EMovementMode::MOVE_Falling);
 	}
 }
 
@@ -275,6 +288,7 @@ void UJPGMovementComponent::PhysGlide(float deltaTime, int32 Iterations)
 
 void UJPGMovementComponent::TickComponent(float DeltaTime, ELevelTick TickType, FActorComponentTickFunction * ThisTickFunction)
 {
+	//UKismetSystemLibrary::PrintString(GetWorld(), GetOwner()->GetName() + FString("bwantsToSprint ") + FString(bWantsToSprint ? "true" : "false"), true, false, FLinearColor::Red, 0.0);
 	//UKismetSystemLibrary::PrintString(GetWorld(), GetOwner()->GetName() + FString("TickComponent"), true, false, FLinearColor::Red, 0.0);
 	Super::TickComponent(DeltaTime, TickType, ThisTickFunction);
 
@@ -283,8 +297,9 @@ void UJPGMovementComponent::TickComponent(float DeltaTime, ELevelTick TickType, 
 	{
 		fJetpackResource = FMath::Clamp<float>(fJetpackResource + GetJetpackRechargeAmount(DeltaTime), 0, 1);
 	}
-	UKismetSystemLibrary::PrintString(GetWorld(), GetOwner()->GetName() + FString("fJetpackResource ") + FString::SanitizeFloat(fJetpackResource), true, false, FLinearColor::Red, 0.0);
-	UKismetSystemLibrary::PrintString(GetWorld(), GetOwner()->GetName() + FString("fDesiredThrottle ") + FString::SanitizeFloat(fDesiredThrottle), true, false, FLinearColor::Red, 0.0);
+	//UKismetSystemLibrary::PrintString(GetWorld(), GetOwner()->GetName() + FString("fJetpackResource ") + FString::SanitizeFloat(fJetpackResource), true, false, FLinearColor::Red, 0.0);
+	//UKismetSystemLibrary::PrintString(GetWorld(), GetOwner()->GetName() + FString("fDesiredThrottle ") + FString::SanitizeFloat(fDesiredThrottle), true, false, FLinearColor::Red, 0.0);
+
 #pragma region Debug Prints
 	//FVector normVel = FVector(Velocity);
 	//normVel.Normalize();
@@ -313,6 +328,7 @@ void UJPGMovementComponent::OnMovementUpdated(float DeltaSeconds, const FVector 
 	{
 		if (CanSprint())
 		{
+
 			SetMovementMode(EMovementMode::MOVE_Custom, ECustomMovementMode::CMOVE_SPRINT);
 		}
 		/*else if (!IsCustomMovementMode(ECustomMovementMode::CMOVE_SPRINT))
@@ -376,6 +392,7 @@ void UJPGMovementComponent::OnMovementModeChanged(EMovementMode PreviousMovement
 
 	if (PreviousMovementMode == EMovementMode::MOVE_Custom && PreviousCustomMode == ECustomMovementMode::CMOVE_SPRINT)
 	{
+
 		SetSprinting(false);
 		MaxWalkSpeed /= SprintSpeedMultiplier;
 	}
@@ -402,6 +419,7 @@ void UJPGMovementComponent::OnMovementModeChanged(EMovementMode PreviousMovement
 
 	if (IsCustomMovementMode(ECustomMovementMode::CMOVE_SPRINT))
 	{
+
 		MaxWalkSpeed *= SprintSpeedMultiplier;
 		suppressSuperNotification = true;
 	}
@@ -523,6 +541,35 @@ float UJPGMovementComponent::GetJetpackRechargeAmount(float time)
 	return 0.0;
 }
 
+void UJPGMovementComponent::ServerApplyCustomState(float TimeStamp, FSavedMove_CustomState &customState)
+{
+	if (!HasValidData() || !IsActive())
+	{
+		return;
+	}
+
+	FNetworkPredictionData_Server_Character* ServerData = GetPredictionData_Server_Character();
+	check(ServerData);
+
+	if (!VerifyClientTimeStamp(TimeStamp, *ServerData))
+	{
+		UE_LOG(LogNetPlayerMovement, Log, TEXT("ServerMove: TimeStamp expired. %f, CurrentTimeStamp: %f"), TimeStamp, ServerData->CurrentClientTimeStamp);
+		return;
+	}
+	ApplyCustomState(customState);
+	lastServerCustomState = customState;	
+}
+
+void UJPGMovementComponent::ApplyCustomState(FSavedMove_CustomState & customState)
+{
+	fJetpackResource = customState.savedJetpackResource;
+	fDistanceFromGround = customState.savedDistanceFromGround;
+	execSetJetpacking(customState.savedDesiredThrottle);
+	bWantsToSprint = customState.savedWantsToSprint;
+	bWantsToGlide = customState.savedWantsToGlide;
+	execSetTeleport(customState.savedWantsToTeleport, customState.savedTeleportDestination);
+}
+
 void UJPGMovementComponent::MulticastPlayTeleportSound_Implementation(FVector location)
 {
 	UKismetSystemLibrary::PrintString(GetWorld(), GetOwner()->GetName() + FString("MulticastPlayTeleportSound_Implementation"), true, true, FLinearColor::Red, 10);
@@ -543,7 +590,7 @@ void UJPGMovementComponent::SetJetpacking(float throttle)
 	if (throttle != fDesiredThrottle)
 	{
 		execSetJetpacking(throttle);
-
+		return;
 #pragma region Networking
 
 		if (!GetOwner() || !GetPawnOwner())
@@ -570,7 +617,7 @@ void UJPGMovementComponent::SetGliding(bool wantsToGlide)
 	if (bWantsToGlide != wantsToGlide)
 	{
 		execSetGliding(wantsToGlide);
-
+		return;
 #pragma region Networking
 
 		if (!GetOwner() || !GetPawnOwner())
@@ -596,7 +643,7 @@ void UJPGMovementComponent::SetTeleport(bool wantsToTeleport, FVector destinatio
 	if (bWantsToTeleport != wantsToTeleport || teleportDestination != destination)
 	{
 		execSetTeleport(wantsToTeleport, destination);
-
+		return;
 #pragma region Networking
 
 		if (!GetOwner() || !GetPawnOwner())
@@ -624,7 +671,7 @@ void UJPGMovementComponent::SetSprinting(bool wantsToSprint)
 	if (bWantsToSprint != wantsToSprint)
 	{
 		execSetSprinting(wantsToSprint);
-
+		return;
 #pragma region Networking
 
 		if (!GetOwner() || !GetPawnOwner())
@@ -632,11 +679,11 @@ void UJPGMovementComponent::SetSprinting(bool wantsToSprint)
 
 		if (!GetOwner()->HasAuthority() && GetPawnOwner()->IsLocallyControlled())
 		{
-			ServerSetSprintingRPC(wantsToSprint);
+			//ServerSetSprintingRPC(wantsToSprint);
 		}
 		else if (GetOwner()->HasAuthority() && !GetPawnOwner()->IsLocallyControlled())
 		{
-			ClientSetSprintingRPC(wantsToSprint);
+			//ClientSetSprintingRPC(wantsToSprint);
 		}
 
 #pragma endregion
@@ -670,7 +717,7 @@ void UJPGMovementComponent::execSetGliding(bool wantsToGlide)
 
 void UJPGMovementComponent::execSetTeleport(bool wantsToTeleport, FVector destination)
 {
-	UKismetSystemLibrary::PrintString(GetWorld(), FString("execSetTeleport"), true, true, FLinearColor::Red, 10);
+	//UKismetSystemLibrary::PrintString(GetWorld(), FString("execSetTeleport"), true, true, FLinearColor::Red, 10);
 	bWantsToTeleport = wantsToTeleport;
 	teleportDestination = destination;
 }
@@ -717,7 +764,7 @@ bool UJPGMovementComponent::ServerSetGlidingRPC_Validate(bool wantsToGlide)
 }
 
 void UJPGMovementComponent::ServerSetGlidingRPC_Implementation(bool wantsToGlide)
-{	
+{
 	MulticastSetGlidingRPC(wantsToGlide);
 }
 
@@ -726,13 +773,18 @@ void UJPGMovementComponent::MulticastSetGlidingRPC_Implementation(bool wantsToGl
 	execSetGliding(wantsToGlide);
 }
 
+void UJPGMovementComponent::MulticastSetControlRotation_Implementation(FRotator cr)
+{
+	simulationControlRotation = cr;
+}
+
 #pragma endregion
 
 #pragma region Sprinting Replication
 
 void UJPGMovementComponent::ClientSetSprintingRPC_Implementation(bool wantsToSprint)
 {
-	execSetSprinting(wantsToSprint);
+	//execSetSprinting(wantsToSprint);
 }
 
 bool UJPGMovementComponent::ServerSetSprintingRPC_Validate(bool wantsToSprint)
@@ -742,12 +794,12 @@ bool UJPGMovementComponent::ServerSetSprintingRPC_Validate(bool wantsToSprint)
 
 void UJPGMovementComponent::ServerSetSprintingRPC_Implementation(bool wantsToSprint)
 {
-	MulticastSetSprintingRPC(wantsToSprint);
+	//MulticastSetSprintingRPC(wantsToSprint);
 }
 
 void UJPGMovementComponent::MulticastSetSprintingRPC_Implementation(bool wantsToSprint)
 {
-	execSetSprinting(wantsToSprint);
+	//execSetSprinting(wantsToSprint);
 }
 
 #pragma endregion
@@ -843,6 +895,41 @@ bool UJPGMovementComponent::CanSprint()
 
 #pragma region Network
 
+#pragma region FSavedMove_CustomState
+
+void FSavedMove_CustomState::Clear()
+{
+	savedJetpackResource = 1.0;
+	savedDistanceFromGround = 0;
+	savedDesiredThrottle = 0;
+	savedWantsToGlide = false;
+	savedWantsToSprint = false;
+}
+
+bool FSavedMove_CustomState::IsImportant(const FSavedMove_CustomState & previous) const
+{
+	if (savedDesiredThrottle != previous.savedDesiredThrottle)
+		return true;
+	if (savedWantsToSprint != previous.savedWantsToSprint)
+		return true;
+	if (savedWantsToGlide != previous.savedWantsToGlide)
+		return true;
+	if (savedWantsToTeleport != previous.savedWantsToTeleport)
+		return true;
+	if (savedTeleportDestination != previous.savedTeleportDestination)
+		return true;
+	return false;
+}
+
+bool FSavedMove_CustomState::IsDefault() const
+{
+	return IsImportant(FSavedMove_CustomState());
+}
+
+#pragma endregion
+
+#pragma region FNetworkPredictionData_Client
+
 FNetworkPredictionData_Client*
 UJPGMovementComponent::GetPredictionData_Client() const
 {
@@ -855,8 +942,8 @@ UJPGMovementComponent::GetPredictionData_Client() const
 		UJPGMovementComponent* MutableThis = const_cast<UJPGMovementComponent*>(this);
 
 		MutableThis->ClientPredictionData = new FNetworkPredictionData_Client_JPGMovement(*this);
-		//MutableThis->ClientPredictionData->MaxSmoothNetUpdateDist = 92.f;
-		//MutableThis->ClientPredictionData->NoSmoothNetUpdateDist = 140.f;
+		MutableThis->ClientPredictionData->MaxSmoothNetUpdateDist = 92.f;
+		MutableThis->ClientPredictionData->NoSmoothNetUpdateDist = 140.f;
 	}
 	return ClientPredictionData;
 }
@@ -872,14 +959,14 @@ FSavedMovePtr FNetworkPredictionData_Client_JPGMovement::AllocateNewMove()
 	return FSavedMovePtr(new FSavedMove_JPGMovement());
 }
 
+#pragma endregion
+
+#pragma region FSavedMove_JPGMovement
+
 void FSavedMove_JPGMovement::Clear()
 {
 	Super::Clear();
-	savedJetpackResource = 1.0;
-	savedDistanceFromGround = 0;
-	savedDesiredThrottle = 0;
-	savedWantsToGlide = false;
-	savedWantsToSprint = false;
+	customState.Clear();
 }
 
 uint8 FSavedMove_JPGMovement::GetCompressedFlags() const
@@ -889,18 +976,10 @@ uint8 FSavedMove_JPGMovement::GetCompressedFlags() const
 
 bool FSavedMove_JPGMovement::CanCombineWith(const FSavedMovePtr & NewMove, ACharacter * Character, float MaxDelta) const
 {
-	if (savedDistanceFromGround != ((FSavedMove_JPGMovement*)&NewMove)->savedDistanceFromGround)
+	if (!customState.IsImportant(((FSavedMove_JPGMovement*)&NewMove)->customState))
+	{
 		return false;
-	if (savedDesiredThrottle != ((FSavedMove_JPGMovement*)&NewMove)->savedDesiredThrottle)
-		return false;
-	if (savedWantsToSprint != ((FSavedMove_JPGMovement*)&NewMove)->savedWantsToSprint)
-		return false;
-	if (savedWantsToGlide != ((FSavedMove_JPGMovement*)&NewMove)->savedWantsToGlide)
-		return false;
-	if (savedWantsToTeleport != ((FSavedMove_JPGMovement*)&NewMove)->savedWantsToTeleport)
-		return false;
-	if (savedTeleportDestination != ((FSavedMove_JPGMovement*)&NewMove)->savedTeleportDestination)
-		return false;
+	}
 
 	return Super::CanCombineWith(NewMove, Character, MaxDelta);
 }
@@ -918,6 +997,10 @@ void FSavedMove_JPGMovement::CombineWith(const FSavedMove_Character * OldMove, A
 	Super::CombineWith(OldMove, InCharacter, PC, OldStartLocation);
 }
 
+bool FSavedMove_JPGMovement::IsImportantMove(const FSavedMovePtr & LastAckedMove) const
+{	
+	return Super::IsImportantMove(LastAckedMove) || customState.IsImportant(((FSavedMove_JPGMovement*)&LastAckedMove)->customState);
+}
 
 void FSavedMove_JPGMovement::SetMoveFor(ACharacter * Character, float InDeltaTime, FVector const & NewAccel, FNetworkPredictionData_Client_Character & ClientData)
 {
@@ -925,13 +1008,13 @@ void FSavedMove_JPGMovement::SetMoveFor(ACharacter * Character, float InDeltaTim
 	UJPGMovementComponent* CharMov = Cast<UJPGMovementComponent>(Character->GetCharacterMovement());
 	if (CharMov)
 	{
-		savedJetpackResource = CharMov->fJetpackResource;
-		savedDistanceFromGround = CharMov->fDistanceFromGround;
-		savedDesiredThrottle = CharMov->fDesiredThrottle;
-		savedWantsToSprint = CharMov->bWantsToSprint;
-		savedWantsToGlide = CharMov->bWantsToGlide;
-		savedWantsToTeleport = CharMov->bWantsToTeleport;
-		savedTeleportDestination = CharMov->teleportDestination;
+		customState.savedJetpackResource = CharMov->fJetpackResource;
+		customState.savedDistanceFromGround = CharMov->fDistanceFromGround;
+		customState.savedDesiredThrottle = CharMov->fDesiredThrottle;
+		customState.savedWantsToSprint = CharMov->bWantsToSprint;
+		customState.savedWantsToGlide = CharMov->bWantsToGlide;
+		customState.savedWantsToTeleport = CharMov->bWantsToTeleport;
+		customState.savedTeleportDestination = CharMov->teleportDestination;
 	}
 }
 
@@ -942,13 +1025,242 @@ void FSavedMove_JPGMovement::PrepMoveFor(ACharacter * Character)
 	UJPGMovementComponent* CharMov = Cast<UJPGMovementComponent>(Character->GetCharacterMovement());
 	if (CharMov)
 	{
-		CharMov->fJetpackResource = savedJetpackResource;
-		CharMov->fDistanceFromGround = savedDistanceFromGround;
-		CharMov->execSetJetpacking(savedDesiredThrottle);
-		CharMov->bWantsToSprint = savedWantsToSprint;
-		CharMov->bWantsToGlide = savedWantsToGlide;
-		CharMov->execSetTeleport(savedWantsToGlide, savedTeleportDestination);
+		CharMov->fJetpackResource = customState.savedJetpackResource;
+		CharMov->fDistanceFromGround = customState.savedDistanceFromGround;
+		CharMov->execSetJetpacking(customState.savedDesiredThrottle);
+		CharMov->bWantsToSprint = customState.savedWantsToSprint;
+		CharMov->bWantsToGlide = customState.savedWantsToGlide;
+		CharMov->execSetTeleport(customState.savedWantsToTeleport, customState.savedTeleportDestination);
 	}
+}
+
+#pragma endregion
+
+#pragma region ServerMoveExtended
+
+void UJPGMovementComponent::CallServerMove(const FSavedMove_Character * NewMove, const FSavedMove_Character * OldMove)
+{
+	check(NewMove != nullptr);
+	const FSavedMove_JPGMovement* jpgNewMove = ((FSavedMove_JPGMovement*)NewMove);
+	FNetworkPredictionData_Client_Character* ClientData = GetPredictionData_Client_Character();
+	const FSavedMove_JPGMovement * lastAckJPGSavedMove = nullptr;
+
+	bool isCustomStateImportant = true;
+	if (ClientData)
+	{
+		lastAckJPGSavedMove = (FSavedMove_JPGMovement*)ClientData->LastAckedMove.Get();
+	}
+	if ((lastAckJPGSavedMove && !jpgNewMove->customState.IsImportant(lastAckJPGSavedMove->customState)) )
+	{
+		isCustomStateImportant = false;
+	}
+
+	// Compress rotation down to 5 bytes
+	const uint32 ClientYawPitchINT = PackYawAndPitchTo32(NewMove->SavedControlRotation.Yaw, NewMove->SavedControlRotation.Pitch);
+	const uint8 ClientRollBYTE = FRotator::CompressAxisToByte(NewMove->SavedControlRotation.Roll);
+
+	// Determine if we send absolute or relative location
+	UPrimitiveComponent* ClientMovementBase = NewMove->EndBase.Get();
+	const FName ClientBaseBone = NewMove->EndBoneName;
+	const FVector SendLocation = MovementBaseUtility::UseRelativeLocation(ClientMovementBase) ? NewMove->SavedRelativeLocation : NewMove->SavedLocation;
+
+	// send old move if it exists
+	if (OldMove)
+	{
+		const FSavedMove_JPGMovement* jpgOldMove = ((FSavedMove_JPGMovement*)OldMove);
+		if ( (lastAckJPGSavedMove && !jpgOldMove->customState.IsImportant(lastAckJPGSavedMove->customState)) )
+		{
+			ServerMoveExtendedOld(OldMove->TimeStamp, OldMove->Acceleration, OldMove->GetCompressedFlags(), nullptr);
+		}
+		else
+		{
+			ServerMoveExtendedOld(OldMove->TimeStamp, OldMove->Acceleration, OldMove->GetCompressedFlags(), jpgOldMove);
+		}
+		
+	}
+	
+	if (const FSavedMove_Character* const PendingMove = ClientData->PendingMove.Get())
+	{
+		const FSavedMove_JPGMovement* jpgPendingMove = ((FSavedMove_JPGMovement*)PendingMove);
+		const uint32 OldClientYawPitchINT = PackYawAndPitchTo32(ClientData->PendingMove->SavedControlRotation.Yaw, ClientData->PendingMove->SavedControlRotation.Pitch);
+
+		// If we delayed a move without root motion, and our new move has root motion, send these through a special function, so the server knows how to process them.
+		if ((PendingMove->RootMotionMontage == NULL) && (NewMove->RootMotionMontage != NULL))
+		{
+
+			// send two moves simultaneously
+			ServerMoveExtendedDualHybridRootMotion(
+				PendingMove->TimeStamp,
+				PendingMove->Acceleration,
+				PendingMove->GetCompressedFlags(),
+				OldClientYawPitchINT,
+				NewMove->TimeStamp,
+				NewMove->Acceleration,
+				SendLocation,
+				NewMove->GetCompressedFlags(),
+				ClientRollBYTE,
+				ClientYawPitchINT,
+				ClientMovementBase,
+				ClientBaseBone,
+				NewMove->EndPackedMovementMode,
+				isCustomStateImportant ? jpgNewMove : nullptr
+			);
+		}
+		else
+		{
+
+			// send two moves simultaneously
+			ServerMoveExtendedDual(
+				PendingMove->TimeStamp,
+				PendingMove->Acceleration,
+				PendingMove->GetCompressedFlags(),
+				OldClientYawPitchINT,
+				NewMove->TimeStamp,
+				NewMove->Acceleration,
+				SendLocation,
+				NewMove->GetCompressedFlags(),
+				ClientRollBYTE,
+				ClientYawPitchINT,
+				ClientMovementBase,
+				ClientBaseBone,
+				NewMove->EndPackedMovementMode,
+				isCustomStateImportant ? jpgNewMove : nullptr
+			);
+		}
+	}
+	else
+	{
+
+		ServerMoveExtended(
+			NewMove->TimeStamp,
+			NewMove->Acceleration,
+			SendLocation,
+			NewMove->GetCompressedFlags(),
+			ClientRollBYTE,
+			ClientYawPitchINT,
+			ClientMovementBase,
+			ClientBaseBone,
+			NewMove->EndPackedMovementMode,
+			isCustomStateImportant ? jpgNewMove : nullptr
+		);
+	}
+
+	MarkForClientCameraUpdate();
+}
+
+void UJPGMovementComponent::ServerMoveExtended(float TimeStamp, FVector_NetQuantize10 InAccel, FVector_NetQuantize100 ClientLoc, uint8 CompressedMoveFlags, uint8 ClientRoll, uint32 View, UPrimitiveComponent * ClientMovementBase, FName ClientBaseBoneName, uint8 ClientMovementMode, const FSavedMove_JPGMovement* customMove)
+{
+	if (MovementBaseUtility::IsDynamicBase(ClientMovementBase))
+	{
+		if (customMove == nullptr)
+			JetCharOwner->ServerMove(TimeStamp, InAccel, ClientLoc, CompressedMoveFlags, ClientRoll, View, ClientMovementBase, ClientBaseBoneName, ClientMovementMode);
+		else
+		{
+			JetCharOwner->ServerMoveExtended(TimeStamp, InAccel, ClientLoc, CompressedMoveFlags, ClientRoll, View, ClientMovementBase, ClientBaseBoneName, ClientMovementMode, customMove->customState);
+		}
+	}
+	else
+	{
+		if (customMove == nullptr)
+			JetCharOwner->ServerMoveNoBase(TimeStamp, InAccel, ClientLoc, CompressedMoveFlags, ClientRoll, View, ClientMovementMode);
+		else
+		{
+			JetCharOwner->ServerMoveExtendedNoBase(TimeStamp, InAccel, ClientLoc, CompressedMoveFlags, ClientRoll, View, ClientMovementMode, customMove->customState);
+		}
+	}
+}
+
+void UJPGMovementComponent::ServerMoveExtended_Implementation(float TimeStamp, FVector_NetQuantize10 InAccel, FVector_NetQuantize100 ClientLoc, uint8 CompressedMoveFlags, uint8 ClientRoll, uint32 View, UPrimitiveComponent * ClientMovementBase, FName ClientBaseBoneName, uint8 ClientMovementMode, FSavedMove_CustomState &customState)
+{
+	ServerApplyCustomState(TimeStamp,customState);
+	ServerMove_Implementation(TimeStamp, InAccel, ClientLoc, CompressedMoveFlags, ClientRoll, View, ClientMovementBase, ClientBaseBoneName, ClientMovementMode);
+}
+
+bool UJPGMovementComponent::ServerMoveExtended_Validate(float TimeStamp, FVector_NetQuantize10 InAccel, FVector_NetQuantize100 ClientLoc, uint8 CompressedMoveFlags, uint8 ClientRoll, uint32 View, UPrimitiveComponent * ClientMovementBase, FName ClientBaseBoneName, uint8 ClientMovementMode, FSavedMove_CustomState &customState)
+{
+	return ServerMove_Validate(TimeStamp, InAccel, ClientLoc, CompressedMoveFlags, ClientRoll, View, ClientMovementBase, ClientBaseBoneName, ClientMovementMode);
+}
+
+void UJPGMovementComponent::ServerMoveExtendedDual(float TimeStamp0, FVector_NetQuantize10 InAccel0, uint8 PendingFlags, uint32 View0, float TimeStamp, FVector_NetQuantize10 InAccel, FVector_NetQuantize100 ClientLoc, uint8 NewFlags, uint8 ClientRoll, uint32 View, UPrimitiveComponent * ClientMovementBase, FName ClientBaseBoneName, uint8 ClientMovementMode, const FSavedMove_JPGMovement* customMove)
+{
+	if (MovementBaseUtility::IsDynamicBase(ClientMovementBase))
+	{
+		if (customMove == nullptr)
+			JetCharOwner->ServerMoveDual(TimeStamp0, InAccel0, PendingFlags, View0, TimeStamp, InAccel, ClientLoc, NewFlags, ClientRoll, View, ClientMovementBase, ClientBaseBoneName, ClientMovementMode);
+		else
+			JetCharOwner->ServerMoveExtendedDual(TimeStamp0, InAccel0, PendingFlags, View0, TimeStamp, InAccel, ClientLoc, NewFlags, ClientRoll, View, ClientMovementBase, ClientBaseBoneName, ClientMovementMode, customMove->customState);
+	}
+	else
+	{
+		if (customMove == nullptr)
+			JetCharOwner->ServerMoveDualNoBase(TimeStamp0, InAccel0, PendingFlags, View0, TimeStamp, InAccel, ClientLoc, NewFlags, ClientRoll, View, ClientMovementMode);
+		else
+			JetCharOwner->ServerMoveExtendedDualNoBase(TimeStamp0, InAccel0, PendingFlags, View0, TimeStamp, InAccel, ClientLoc, NewFlags, ClientRoll, View, ClientMovementMode, customMove->customState);
+	}
+}
+
+void UJPGMovementComponent::ServerMoveExtendedDual_Implementation(float TimeStamp0, FVector_NetQuantize10 InAccel0, uint8 PendingFlags, uint32 View0, float TimeStamp, FVector_NetQuantize10 InAccel, FVector_NetQuantize100 ClientLoc, uint8 NewFlags, uint8 ClientRoll, uint32 View, UPrimitiveComponent * ClientMovementBase, FName ClientBaseBoneName, uint8 ClientMovementMode, FSavedMove_CustomState &customState)
+{
+	ServerApplyCustomState(TimeStamp, customState);
+	ServerMoveDual_Implementation(TimeStamp0, InAccel0, PendingFlags, View0, TimeStamp, InAccel, ClientLoc, NewFlags, ClientRoll, View, ClientMovementBase, ClientBaseBoneName, ClientMovementMode);
+}
+
+bool UJPGMovementComponent::ServerMoveExtendedDual_Validate(float TimeStamp0, FVector_NetQuantize10 InAccel0, uint8 PendingFlags, uint32 View0, float TimeStamp, FVector_NetQuantize10 InAccel, FVector_NetQuantize100 ClientLoc, uint8 NewFlags, uint8 ClientRoll, uint32 View, UPrimitiveComponent * ClientMovementBase, FName ClientBaseBoneName, uint8 ClientMovementMode, FSavedMove_CustomState &customState)
+{
+	return ServerMoveDual_Validate(TimeStamp0, InAccel0, PendingFlags, View0, TimeStamp, InAccel, ClientLoc, NewFlags, ClientRoll, View, ClientMovementBase, ClientBaseBoneName, ClientMovementMode);;
+}
+
+void UJPGMovementComponent::ServerMoveExtendedDualHybridRootMotion(float TimeStamp0, FVector_NetQuantize10 InAccel0, uint8 PendingFlags, uint32 View0, float TimeStamp, FVector_NetQuantize10 InAccel, FVector_NetQuantize100 ClientLoc, uint8 NewFlags, uint8 ClientRoll, uint32 View, UPrimitiveComponent * ClientMovementBase, FName ClientBaseBoneName, uint8 ClientMovementMode, const FSavedMove_JPGMovement* customMove)
+{
+	if (customMove == nullptr)
+		JetCharOwner->ServerMoveDualHybridRootMotion(TimeStamp0, InAccel0, PendingFlags, View0, TimeStamp, InAccel, ClientLoc, NewFlags, ClientRoll, View, ClientMovementBase, ClientBaseBoneName, ClientMovementMode);
+	else
+		JetCharOwner->ServerMoveExtendedDualHybridRootMotion(TimeStamp0, InAccel0, PendingFlags, View0, TimeStamp, InAccel, ClientLoc, NewFlags, ClientRoll, View, ClientMovementBase, ClientBaseBoneName, ClientMovementMode, customMove->customState);
+}
+
+void UJPGMovementComponent::ServerMoveExtendedDualHybridRootMotion_Implementation(float TimeStamp0, FVector_NetQuantize10 InAccel0, uint8 PendingFlags, uint32 View0, float TimeStamp, FVector_NetQuantize10 InAccel, FVector_NetQuantize100 ClientLoc, uint8 NewFlags, uint8 ClientRoll, uint32 View, UPrimitiveComponent * ClientMovementBase, FName ClientBaseBoneName, uint8 ClientMovementMode, FSavedMove_CustomState &customState)
+{
+	ServerApplyCustomState(TimeStamp, customState);
+	ServerMoveDualHybridRootMotion_Implementation(TimeStamp0, InAccel0, PendingFlags, View0, TimeStamp, InAccel, ClientLoc, NewFlags, ClientRoll, View, ClientMovementBase, ClientBaseBoneName, ClientMovementMode);
+}
+
+bool UJPGMovementComponent::ServerMoveExtendedDualHybridRootMotion_Validate(float TimeStamp0, FVector_NetQuantize10 InAccel0, uint8 PendingFlags, uint32 View0, float TimeStamp, FVector_NetQuantize10 InAccel, FVector_NetQuantize100 ClientLoc, uint8 NewFlags, uint8 ClientRoll, uint32 View, UPrimitiveComponent * ClientMovementBase, FName ClientBaseBoneName, uint8 ClientMovementMode, FSavedMove_CustomState &customState)
+{
+	return ServerMoveDualHybridRootMotion_Validate(TimeStamp0, InAccel0, PendingFlags, View0, TimeStamp, InAccel, ClientLoc, NewFlags, ClientRoll, View, ClientMovementBase, ClientBaseBoneName, ClientMovementMode);
+}
+
+void UJPGMovementComponent::ServerMoveExtendedOld(float OldTimeStamp, FVector_NetQuantize10 OldAccel, uint8 OldMoveFlags, const FSavedMove_JPGMovement* customMove)
+{
+	if (customMove == nullptr)
+		JetCharOwner->ServerMoveOld(OldTimeStamp, OldAccel, OldMoveFlags);
+	else
+		JetCharOwner->ServerMoveExtendedOld(OldTimeStamp, OldAccel, OldMoveFlags, customMove->customState);
+}
+
+void UJPGMovementComponent::ServerMoveExtendedOld_Implementation(float OldTimeStamp, FVector_NetQuantize10 OldAccel, uint8 OldMoveFlags, FSavedMove_CustomState &customState)
+{
+	ServerApplyCustomState(OldTimeStamp, customState);
+	ServerMoveOld_Implementation(OldTimeStamp, OldAccel, OldMoveFlags);
+}
+
+bool UJPGMovementComponent::ServerMoveExtendedOld_Validate(float OldTimeStamp, FVector_NetQuantize10 OldAccel, uint8 OldMoveFlags, FSavedMove_CustomState &customState)
+{
+	return ServerMoveOld_Validate(OldTimeStamp, OldAccel, OldMoveFlags);;
+}
+
+#pragma endregion
+
+void UJPGMovementComponent::GetLifetimeReplicatedProps(TArray< FLifetimeProperty > & OutLifetimeProps) const
+{
+	Super::GetLifetimeReplicatedProps(OutLifetimeProps);
+
+	DOREPLIFETIME_CONDITION(UJPGMovementComponent, lastServerCustomState, COND_SimulatedOnly);
+}
+
+void UJPGMovementComponent::OnRep_ServerCustomState()
+{
+	//UKismetSystemLibrary::PrintString(GetWorld(), GetOwner()->GetName() + FString("OnRep_ServerCustomState"), true, true, FLinearColor::Red, 10);
+	ApplyCustomState(lastServerCustomState);
 }
 
 #pragma endregion

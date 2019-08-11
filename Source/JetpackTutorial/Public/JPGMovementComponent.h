@@ -5,11 +5,9 @@
 #include "GameFramework/CharacterMovementComponent.h"
 #include "UObject/ObjectMacros.h"
 #include "Sound/SoundCue.h"
+#include "Runtime/Engine/Classes/Engine/NetSerialization.h"
 #include "JPGMovementComponent.generated.h"
 
-/**
- *
- */
 UENUM(BlueprintType)
 enum ECustomMovementMode
 {
@@ -17,6 +15,48 @@ enum ECustomMovementMode
 	CMOVE_GLIDE = 2,
 	CMOVE_SPRINT = 3
 };
+
+USTRUCT()
+struct FSavedMove_CustomState
+{
+	GENERATED_USTRUCT_BODY()
+
+	UPROPERTY()
+	float savedJetpackResource;
+	UPROPERTY()
+	float savedDistanceFromGround;
+	UPROPERTY()
+	float savedDesiredThrottle;
+	UPROPERTY()
+	bool savedWantsToGlide;
+	UPROPERTY()
+	bool savedWantsToSprint;
+	UPROPERTY()
+	bool savedWantsToTeleport;
+	UPROPERTY()
+	FVector savedTeleportDestination;
+
+	FSavedMove_CustomState() : savedJetpackResource(0.0), savedDistanceFromGround(0.0), savedDesiredThrottle(0.0), savedWantsToGlide(false), savedWantsToSprint(false), savedWantsToTeleport(false), savedTeleportDestination(FVector::ZeroVector) {}
+
+	FSavedMove_CustomState(float jr, float dfg, float dt, bool wtg, bool wts, bool wtt, FVector td) : savedJetpackResource(jr), savedDistanceFromGround(dfg), savedDesiredThrottle(dt), savedWantsToGlide(wtg), savedWantsToSprint(wts), savedWantsToTeleport(wtt), savedTeleportDestination(dt) {}
+
+	void Clear();
+	bool IsImportant(const FSavedMove_CustomState &previous) const;
+	bool IsDefault() const;
+
+
+	//bool NetSerialize(FArchive& Ar, class UPackageMap* Map, bool& bOutSuccess);
+};
+
+//template<>
+//struct TStructOpsTypeTraits<FSavedMove_CustomState> : public TStructOpsTypeTraitsBase2<FSavedMove_CustomState>
+//{
+//	enum
+//	{
+//		WithNetSerializer = true
+//	};
+//};
+
 
 DECLARE_DYNAMIC_MULTICAST_DELEGATE_TwoParams(FDesiredThrottleDelegate, float, oldThrottle,float,newThrottle);
 
@@ -32,16 +72,23 @@ class JETPACKTUTORIAL_API UJPGMovementComponent : public UCharacterMovementCompo
 
 	friend class FSavedMove_JPGMovement;
 
+	AJetChar* JetCharOwner;
+
 #pragma region Overrides
 
 	virtual void TickComponent(float DeltaTime, enum ELevelTick TickType, FActorComponentTickFunction *ThisTickFunction) override;
 	virtual void PhysCustom(float deltaTime, int32 Iterations) override;
 	virtual void OnMovementUpdated(float DeltaSeconds, const FVector & OldLocation, const FVector & OldVelocity) override;
 	virtual void OnMovementModeChanged(EMovementMode PreviousMovementMode, uint8 PreviousCustomMode) override;
+	virtual void CallServerMove(const class FSavedMove_Character* NewMove, const class FSavedMove_Character* OldMove);
+	virtual void GetLifetimeReplicatedProps(TArray< FLifetimeProperty > & OutLifetimeProps) const;
+	
 	virtual float GetMaxSpeed() const override;
 	virtual float GetMaxAcceleration() const override;
 	virtual bool IsFalling() const override;
 	virtual bool IsMovingOnGround() const override;
+
+	
 
 #pragma region Networking
 	virtual FNetworkPredictionData_Client* GetPredictionData_Client() const override;
@@ -63,9 +110,13 @@ class JETPACKTUTORIAL_API UJPGMovementComponent : public UCharacterMovementCompo
 	bool IsCustomMovementMode(uint8 cm) const;
 	void ProcessTeleport();
 	float GetJetpackRechargeAmount(float time);
+	void ServerApplyCustomState(float TimeStamp, FSavedMove_CustomState &customState);
+	void ApplyCustomState(FSavedMove_CustomState &customState);
 
 	UFUNCTION(NetMulticast, unreliable)
 		void MulticastPlayTeleportSound(FVector location);
+
+	FRotator simulationControlRotation;
 
 
 #pragma endregion
@@ -82,6 +133,9 @@ protected:
 #pragma endregion
 
 public:
+
+	UFUNCTION(BlueprintCallable, BlueprintPure, Category = "Custom")
+		FORCEINLINE AJetChar* GetJetCharacterOwner() { return JetCharOwner; };
 
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = Status)
 		TEnumAsByte<ECustomMovementMode> ECustomMovementMode;
@@ -173,6 +227,8 @@ public:
 		void ClientSetGlidingRPC(bool wantsToGlide);
 	UFUNCTION(NetMulticast, Reliable, BlueprintCallable)
 		void MulticastSetGlidingRPC(bool wantsToGlide);
+	UFUNCTION(NetMulticast, Reliable, BlueprintCallable)
+		void MulticastSetControlRotation(FRotator cr);
 
 	UFUNCTION(Server, Reliable, WithValidation, BlueprintCallable)
 		void ServerSetTeleportRPC(bool wantsToTeleport, FVector destination);
@@ -206,6 +262,11 @@ public:
 
 #pragma region State Variables
 
+	UFUNCTION()
+	void OnRep_ServerCustomState();
+	UPROPERTY(ReplicatedUsing=OnRep_ServerCustomState)
+	FSavedMove_CustomState lastServerCustomState;	
+
 	UPROPERTY(BlueprintReadOnly, Category = "Custom|State")
 		float fEffectiveThrottle;
 	UPROPERTY(BlueprintReadOnly, Category = "Custom|State")
@@ -229,16 +290,43 @@ public:
 #pragma endregion
 
 	FVector distanceCheckOrigin;
+
+#pragma region ServerMoveExtended
+
+	virtual void ServerMoveExtended(float TimeStamp, FVector_NetQuantize10 InAccel, FVector_NetQuantize100 ClientLoc, uint8 CompressedMoveFlags, uint8 ClientRoll, uint32 View, UPrimitiveComponent* ClientMovementBase, FName ClientBaseBoneName, uint8 ClientMovementMode, const FSavedMove_JPGMovement* customMove);
+	virtual void ServerMoveExtended_Implementation(float TimeStamp, FVector_NetQuantize10 InAccel, FVector_NetQuantize100 ClientLoc, uint8 CompressedMoveFlags, uint8 ClientRoll, uint32 View, UPrimitiveComponent* ClientMovementBase, FName ClientBaseBoneName, uint8 ClientMovementMode, FSavedMove_CustomState &customState);
+	virtual bool ServerMoveExtended_Validate(float TimeStamp, FVector_NetQuantize10 InAccel, FVector_NetQuantize100 ClientLoc, uint8 CompressedMoveFlags, uint8 ClientRoll, uint32 View, UPrimitiveComponent* ClientMovementBase, FName ClientBaseBoneName, uint8 ClientMovementMode, FSavedMove_CustomState &customState);
+
+	/**
+	 * Replicated function sent by client to server - contains client movement and view info for two moves.
+	 * Calls either CharacterOwner->ServerMoveExtendedDual() or CharacterOwner->ServerMoveExtendedDualNoBase() depending on whehter ClientMovementBase is null.
+	 */
+	virtual void ServerMoveExtendedDual(float TimeStamp0, FVector_NetQuantize10 InAccel0, uint8 PendingFlags, uint32 View0, float TimeStamp, FVector_NetQuantize10 InAccel, FVector_NetQuantize100 ClientLoc, uint8 NewFlags, uint8 ClientRoll, uint32 View, UPrimitiveComponent* ClientMovementBase, FName ClientBaseBoneName, uint8 ClientMovementMode, const FSavedMove_JPGMovement* customMove);
+	virtual void ServerMoveExtendedDual_Implementation(float TimeStamp0, FVector_NetQuantize10 InAccel0, uint8 PendingFlags, uint32 View0, float TimeStamp, FVector_NetQuantize10 InAccel, FVector_NetQuantize100 ClientLoc, uint8 NewFlags, uint8 ClientRoll, uint32 View, UPrimitiveComponent* ClientMovementBase, FName ClientBaseBoneName, uint8 ClientMovementMode, FSavedMove_CustomState &customState);
+	virtual bool ServerMoveExtendedDual_Validate(float TimeStamp0, FVector_NetQuantize10 InAccel0, uint8 PendingFlags, uint32 View0, float TimeStamp, FVector_NetQuantize10 InAccel, FVector_NetQuantize100 ClientLoc, uint8 NewFlags, uint8 ClientRoll, uint32 View, UPrimitiveComponent* ClientMovementBase, FName ClientBaseBoneName, uint8 ClientMovementMode, FSavedMove_CustomState &customState);
+
+	/** Replicated function sent by client to server - contains client movement and view info for two moves. First move is non root motion, second is root motion. */
+	virtual void ServerMoveExtendedDualHybridRootMotion(float TimeStamp0, FVector_NetQuantize10 InAccel0, uint8 PendingFlags, uint32 View0, float TimeStamp, FVector_NetQuantize10 InAccel, FVector_NetQuantize100 ClientLoc, uint8 NewFlags, uint8 ClientRoll, uint32 View, UPrimitiveComponent* ClientMovementBase, FName ClientBaseBoneName, uint8 ClientMovementMode, const FSavedMove_JPGMovement* customMove);
+	virtual void ServerMoveExtendedDualHybridRootMotion_Implementation(float TimeStamp0, FVector_NetQuantize10 InAccel0, uint8 PendingFlags, uint32 View0, float TimeStamp, FVector_NetQuantize10 InAccel, FVector_NetQuantize100 ClientLoc, uint8 NewFlags, uint8 ClientRoll, uint32 View, UPrimitiveComponent* ClientMovementBase, FName ClientBaseBoneName, uint8 ClientMovementMode, FSavedMove_CustomState &customState);
+	virtual bool ServerMoveExtendedDualHybridRootMotion_Validate(float TimeStamp0, FVector_NetQuantize10 InAccel0, uint8 PendingFlags, uint32 View0, float TimeStamp, FVector_NetQuantize10 InAccel, FVector_NetQuantize100 ClientLoc, uint8 NewFlags, uint8 ClientRoll, uint32 View, UPrimitiveComponent* ClientMovementBase, FName ClientBaseBoneName, uint8 ClientMovementMode, FSavedMove_CustomState &customState);
+
+	/* Resending an (important) old move. Process it if not already processed. */
+	virtual void ServerMoveExtendedOld(float OldTimeStamp, FVector_NetQuantize10 OldAccel, uint8 OldMoveFlags, const FSavedMove_JPGMovement* customMove);
+	virtual void ServerMoveExtendedOld_Implementation(float OldTimeStamp, FVector_NetQuantize10 OldAccel, uint8 OldMoveFlags, FSavedMove_CustomState &customState);
+	virtual bool ServerMoveExtendedOld_Validate(float OldTimeStamp, FVector_NetQuantize10 OldAccel, uint8 OldMoveFlags, FSavedMove_CustomState &customState);
+
+#pragma endregion
+
 };
 
 #pragma region Networking
 
+
+
 /** FSavedMove_Character represents a saved move on the client that has been sent to the server and might need to be played back. */
 class FSavedMove_JPGMovement : public FSavedMove_Character
 {
-
 	friend class UJPGMovementComponent;
-	
 
 public:
 	typedef FSavedMove_Character Super;
@@ -248,15 +336,9 @@ public:
 	virtual void SetMoveFor(ACharacter* Character, float InDeltaTime, FVector const& NewAccel, class FNetworkPredictionData_Client_Character & ClientData) override;
 	virtual void PrepMoveFor(ACharacter* Character) override;
 	virtual void CombineWith(const FSavedMove_Character* OldMove, ACharacter* InCharacter, APlayerController* PC, const FVector& OldStartLocation) override;
-
-	float savedJetpackResource;
-	float savedDistanceFromGround;
-	float savedDesiredThrottle;
-	bool savedWantsToGlide : 1;
-	bool savedWantsToSprint : 1;
-
-	bool savedWantsToTeleport : 1;
-	FVector savedTeleportDestination;
+	virtual bool IsImportantMove(const FSavedMovePtr& LastAckedMove) const override;
+	FSavedMove_CustomState customState;
+	
 };
 
 /** Get prediction data for a client game. Should not be used if not running as a client. Allocates the data on demand and can be overridden to allocate a custom override if desired. Result must be a FNetworkPredictionData_Client_Character. */
